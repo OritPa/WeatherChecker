@@ -5,6 +5,35 @@ import pandas as pd
 import json
 
 
+
+def find_matching_cities(city: str, limit: int = 5):
+    api_key = "7ca1b7fdc9a1b1da782c8929f3e2d595"
+    geo_url = f"http://api.openweathermap.org/geo/1.0/direct?q={city}&limit={limit}&appid={api_key}"
+
+    try:
+        response = requests.get(geo_url)
+        response.raise_for_status()
+        results = response.json()
+
+        if not results:
+            return []
+
+        cities = []
+        for item in results:
+            cities.append({
+                "lat": item["lat"],
+                "lon": item["lon"],
+                "city_name": item["name"],
+                "state_name": item.get("state", ""),
+                "country_name": item["country"]
+            })
+
+        return cities
+
+    except requests.exceptions.RequestException as error:
+        print(f"Geo API error: {error}")
+        return []
+
 def is_valid_city_input(city):
     # checks if the input is correct there are digits or special chars
     special_char= "!@#$%^&*()_+-=[]{}/\\|;:'\",<>?`"
@@ -12,10 +41,9 @@ def is_valid_city_input(city):
     has_special= any(char in special_char for char in city)
     return not is_digit and not has_special
 
-def does_city_exists(city: str, api_key: str):
+def does_city_exists(lat: float, lon: float, api_key: str):
      #Validate city name via OpenWeatherMap Geocoding API.
-
-    geo_url = f"http://api.openweathermap.org/geo/1.0/direct?q={city}&limit=1&appid={api_key}"
+    geo_url = f"http://api.openweathermap.org/geo/1.0/reverse?lat={lat}&lon={lon}&limit=1&appid={api_key}"
 
     try:
         geo_response = requests.get(geo_url)
@@ -38,25 +66,16 @@ def does_city_exists(city: str, api_key: str):
         print(f"Error in geo data: {geo_error}")
         return None
 
-def current_weather_data(city):
+def current_weather_data(lat: float, lon: float):
+
     api_key = "7ca1b7fdc9a1b1da782c8929f3e2d595"
 
-    if not is_valid_city_input(city):
-        print("Invalid city input. Please enter input without digits or special characters")
-        return None
+    weather_url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={api_key}&units=metric"
 
-    location = does_city_exists(city, api_key)
-    if not location:
-        print("City not found!")
-        return None
-
-    lat, lon = location["lat"], location["lon"]
+    location= does_city_exists(lat, lon, api_key)
     city_name = location["city_name"]
-    state_name = location["state_name"]
     country_name = location["country_name"]
 
-
-    weather_url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}&units=metric"
 
     try:
         weather_response = requests.get(weather_url)
@@ -73,8 +92,7 @@ def current_weather_data(city):
         local_dt = datetime.fromtimestamp(timestamp, tz=target_tz)
 
         weather_info = {
-            "city": city_name,
-            "state": state_name,
+            "city": city_name ,
             "country": country_name,
             "temperature": round(data['main']['temp'], 1),
             "feels_like": round(data['main']['feels_like'], 1),
@@ -85,7 +103,7 @@ def current_weather_data(city):
             "icon": data['weather'][0]['icon'],
             "longitude": lon,
             "latitude": lat,
-            "timestamp": local_dt
+            "local_timestamp": local_dt
         }
 
         return weather_info
@@ -161,9 +179,35 @@ def five_day_forcast(city):
 st.title('Streamlit Weather Checker App')
 st.markdown('Creator: Orit Padawer')
 st.markdown('Data retrieved from https://openweathermap.org/api')
+col1, col2= st.columns(2)
+with col1:
+    city_input= st.text_input("Enter a city")
+with col2:
+    if city_input:
+            matches = find_matching_cities(city_input)
 
-city= st.text_input("Enter a city").capitalize()
-if city:
-    print(city)
+    if matches:
+        city_names = [
+            f"{m['city_name']}, {m['state_name']}, {m['country_name']}".strip(', ')
+            for m in matches
+        ]
+        selected_city_str = st.selectbox("Choose a city:", city_names)
+        selected_city = matches[city_names.index(selected_city_str)]
+
+        lat, lon = selected_city['lat'], selected_city['lon']
+        st.success(f"You selected: {selected_city_str}")
+
+        # Now call GetWeatherData(lat, lon)
+    else:
+        st.warning("No matching cities found.")
 
 
+    weather = current_weather_data(lat, lon)
+    if weather:
+        st.subheader(f"Weather in {weather['city']}, {weather['country']}")
+        st.write(f"Temperature: {weather['temperature']}°C")
+        st.write(f"Feels like: {weather['feels_like']}°C")
+        st.write(f"Description: {weather['description'].title()}")
+        st.write(f"Local time: {weather["local_timestamp"]}")
+    else:
+        st.error("Could not fetch weather data.")
