@@ -190,10 +190,33 @@ def five_day_forcast(lat: float, lon: float):
 
 
 #Streamlit app
+st.set_page_config(layout="wide")
+st.markdown("""
+    <style>
+        .stApp {
+            background-color: #e3f2fd;
+        }
+
+        .main {
+            max-width: 100%;
+            padding-left: 3rem;
+            padding-right: 3rem;
+        }
+
+        table {
+            width: 100%;
+        }
+
+        .dataframe th, .dataframe td {
+            text-align: center;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 st.title('Streamlit Weather Checker App')
 st.markdown('Creator: Orit Padawer')
 st.markdown('Data retrieved from https://openweathermap.org/api')
-col1, col2= st.columns(2)
+col1, spacer, col2 = st.columns([1, 0.2, 1])
 with col1:
     city1_input= st.text_input("Enter a city")
 
@@ -286,7 +309,7 @@ if weather1:
 
 # add metrics
 if weather1 and weather2:
-  col1, col2 = st.columns(2)
+  col1, spacer, col2 = st.columns([1, 0.2, 1])
 
   with col1:
 
@@ -384,7 +407,7 @@ def build_forecast_dataframe(forecast_data):
 
 
 if forecast1 and forecast2:
-  col1, col2 = st.columns(2)
+  col1, spacer, col2 = st.columns([1, 0.2, 1])
 
   with col1:
     df1 = build_forecast_dataframe(forecast1)
