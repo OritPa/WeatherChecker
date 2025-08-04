@@ -4,8 +4,9 @@ from datetime import datetime, timedelta , timezone
 import pandas as pd
 import json
 import folium
-from streamlit_folium import st_folium ,folium_static
-
+from streamlit_folium import st_folium
+import pytz
+import plotly.express as px
 
 def find_matching_cities(city: str, limit: int = 5):
     api_key = "7ca1b7fdc9a1b1da782c8929f3e2d595"
@@ -77,8 +78,6 @@ def current_weather_data(lat: float, lon: float):
     city_name = location["city_name"]
     country_name = location["country_name"]
 
-
-
     try:
         weather_response = requests.get(weather_url)
         weather_response.raise_for_status()
@@ -93,6 +92,7 @@ def current_weather_data(lat: float, lon: float):
         target_tz = timezone(timedelta(seconds=timezone_offset))
         local_dt = datetime.fromtimestamp(timestamp, tz=target_tz)
 
+
         weather_info = {
             "city": city_name ,
             "country": country_name,
@@ -103,7 +103,8 @@ def current_weather_data(lat: float, lon: float):
             "humidity": data['main']['humidity'],
             "description": data['weather'][0]['description'],
             "icon": data['weather'][0]['icon'],
-            "local_timestamp": local_dt,
+            "local_timestamp": local_dt.isoformat(),
+            "local_timezone": timezone_offset,
             "lat": lat,
             "lon":lon
         }
@@ -189,8 +190,65 @@ def five_day_forcast(lat: float, lon: float):
         return None
 
 
-#Streamlit app
-st.set_page_config(layout="wide")
+
+def get_daily_max_temps_direct(lat, lon):
+    today = datetime.now(pytz.utc).date()
+    end_date = today - timedelta(days=1)
+    start_date = end_date - timedelta(days=30)
+
+    url = "https://archive-api.open-meteo.com/v1/era5"
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "daily": "temperature_2m_max",
+        "timezone": "auto"
+    }
+
+    try:
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+
+        df = pd.DataFrame({
+            "Date": pd.to_datetime(data["daily"]["time"]),
+            "Max Temp (°C)": data["daily"]["temperature_2m_max"]
+        })
+
+        return df
+
+    except Exception as e:
+        print(f"Error fetching daily max temps: {e}")
+        return pd.DataFrame()
+
+#UI Functions
+def display_city_time(weather_info):
+    """
+    Accepts a weather_info dictionary and returns formatted local time string.
+    """
+    timezone_offset = weather_info["local_timezone"]
+
+    utc_now = datetime.now(pytz.utc)
+    city_time = utc_now + timedelta(seconds=timezone_offset)
+    return f"{city_time.strftime('%B %d, %Y, %H:%M:%S')} "
+
+def build_forecast_dataframe(forecast_data):
+    rows = []
+    for day in forecast_data["forecast"]:
+        #icon_url = f"http://openweathermap.org/img/wn/{day['icon']}@2x.png"
+        rows.append({
+            "Date": f"{day['date']} {day['time']}",
+            #"Icon": f"![icon]({icon_url})",
+            "Temp (°C)": day["temp"],
+            "Humidity (%)": day["humidity"],
+            "Wind Speed": day["wind_speed"],
+            "Description": day["description"].capitalize()
+        })
+    return pd.DataFrame(rows)
+
+#Streamlit app UI
+#st.set_page_config(layout="wide")
 st.markdown("""
     <style>
         .stApp {
@@ -216,31 +274,41 @@ st.markdown("""
 st.title('Streamlit Weather Checker App')
 st.markdown('Creator: Orit Padawer')
 st.markdown('Data retrieved from https://openweathermap.org/api')
-col1, spacer, col2 = st.columns([1, 0.2, 1])
+
+#adding user local time
+user_time = datetime.now().astimezone()
+user_time_str = user_time.strftime("%A , %B %d, %Y, %H:%M:%S")
+st.markdown(f"Current Local Time: ,{user_time_str} ")
+
+#City Selection by default 1 city, optional additional city
+
+col1, spacer, col2 = st.columns([1, 0.1, 1])
 with col1:
     city1_input= st.text_input("Enter a city")
 
     selected_city1 = None
     weather1 = None
     forecast1 = None
-
+    history1 = None
+    matches = []
+# Let user enter a city and find alternatives based on his selection
     if city1_input:
             matches = find_matching_cities(city1_input)
 
     if matches:
         city_names = [
-            f"{m['city_name']}, {m['state_name']}, {m['country_name']}".strip(', ')
-            for m in matches
-        ]
+          f"{m['city_name']}, {m['state_name']}, {m['country_name']}".strip(', ')
+          for m in matches
+         ]
         selected_city_str = st.selectbox("Choose a city:", city_names, key="city1_select")
         selected_city1 = matches[city_names.index(selected_city_str)]
 
         lat1, lon1 = selected_city1['lat'], selected_city1['lon']
-        #st.success(f"You selected: {selected_city_str}")
+            #st.success(f"You selected: {selected_city_str}")
         weather1 = current_weather_data(lat1, lon1)
         forecast1 = five_day_forcast(lat1, lon1)
+        history1 = get_daily_max_temps_direct(lat1, lon1)
 
-        # Now call GetWeatherData(lat, lon)
     else:
         st.warning("No matching cities found.")
 
@@ -248,10 +316,11 @@ with col1:
     selected_city2 = None
     weather2 = None
     forecast2 = None
+    history2 = None
 
     if compare:
         with col2:
-            city2_input = st.text_input("Enter second city")
+            city2_input = st.text_input("Enter a second city")
 
             if city2_input:
                 matches2 = find_matching_cities(city2_input)
@@ -268,6 +337,7 @@ with col1:
                 #st.success(f"You selected: {selected_city_str2}")
                 weather2 = current_weather_data(lat2, lon2)
                 forecast2 = five_day_forcast(lat2, lon2)
+                history2 = get_daily_max_temps_direct(lat2, lon2)
             else:
                 st.warning("No matching cities found.")
 
@@ -304,7 +374,7 @@ if weather1:
 
         # Display the map below both city inputs
         with st.container():
-            folium_static(m, width=1000, height=250)
+            st_folium(m, width=900, height=250)
 
 
 # add metrics
@@ -319,11 +389,10 @@ if weather1 and weather2:
           st.image(f"http://openweathermap.org/img/wn/{weather1['icon']}@2x.png", width=60)
 
       with info_col:
-          st.subheader(f"{weather1['city']}, {weather1['country']}")
+       st.subheader(f"{weather1['city']}, {weather1['country']}")
+      st.subheader(f"Local Time: {display_city_time(weather1)}")
 
-      st.subheader("Local Time",weather1['local_timestamp'].strftime("%Y-%m-%d %H:%M:%S"))
 
-      # Now below the nested row, show other metrics in two columns
       metric_col1, metric_col2 = st.columns(2)
 
       with metric_col1:
@@ -345,11 +414,10 @@ if weather1 and weather2:
           st.image(f"http://openweathermap.org/img/wn/{weather2['icon']}@2x.png", width=60)
 
       with info_col:
-          st.subheader(f"{weather2['city']}, {weather2['country']}")
+       st.subheader(f"{weather2['city']}, {weather2['country']}")
 
-      st.subheader("Local Time", weather2['local_timestamp'].strftime("%Y-%m-%d %H:%M:%S"))
+      st.subheader(f"Local Time: {display_city_time(weather2)}")
 
-      # Now below the nested row, show other metrics in two columns
       metric_col1, metric_col2 = st.columns(2)
 
       with metric_col1:
@@ -373,7 +441,7 @@ elif weather1:
         with info_col:
             st.subheader(f"{weather1['city']}, {weather1['country']}")
 
-        st.subheader("Local Time", weather1['local_timestamp'].strftime("%Y-%m-%d %H:%M:%S"))
+        st.subheader(f"Local Time: {display_city_time(weather1)}")
 
         # Now below the nested row, show other metrics in two columns
         metric_col1, metric_col2 = st.columns(2)
@@ -390,37 +458,150 @@ elif weather1:
         st.write(f"**{weather1['description'].capitalize()}**")
 
 
-
-def build_forecast_dataframe(forecast_data):
-    rows = []
-    for day in forecast_data["forecast"]:
-        #icon_url = f"http://openweathermap.org/img/wn/{day['icon']}@2x.png"
-        rows.append({
-            "Date": f"{day['date']} {day['time']}",
-            #"Icon": f"![icon]({icon_url})",
-            "Temp (°C)": day["temp"],
-            "Humidity (%)": day["humidity"],
-            "Wind Speed": day["wind_speed"],
-            "Description": day["description"].capitalize()
-        })
-    return pd.DataFrame(rows)
-
-
+# add forecast table
 if forecast1 and forecast2:
-  col1, spacer, col2 = st.columns([1, 0.2, 1])
+  col1, spacer, col2 = st.columns([1, 0.1, 1])
 
   with col1:
     df1 = build_forecast_dataframe(forecast1)
-    st.subheader("Forcast for ",f"{weather1['city']}, {weather1['country']}")
+    st.subheader(f"Forecast for {forecast1['city']}, {forecast1['country']}")
     st.dataframe(df1)
 
   with col2:
     df2 = build_forecast_dataframe(forecast2)
-    st.subheader("Forcast for ",f"{weather2['city']}, {weather2['country']}")
+    st.subheader(f"Forecast for {forecast2['city']}, {forecast2['country']}")
     st.dataframe(df2)
 
 
 elif forecast1:
     df1 = build_forecast_dataframe(forecast1)
-    st.subheader("Forcast for ",f"{weather1['city']}, {weather1['country']}")
+   # df1["Date_Without_Time"] = pd.to_datetime(df1["Date"]).dt.normalize()
+    st.subheader(f"Forecast for {forecast1['city']}, {forecast1['country']}")
     st.dataframe(df1)
+
+
+# add today's history
+
+if (
+    isinstance(history1, pd.DataFrame) and not history1.empty and
+    isinstance(history2, pd.DataFrame) and not history2.empty
+):
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+     fig = px.line(
+        history1,
+        x="Date",
+        y="Max Temp (°C)",
+        markers=True,
+        title=f"Max Temperature For Last 30 Days – {weather1['city']}"
+    )
+
+     fig.update_layout(
+        title_x=0.3,
+        showlegend=False,
+        xaxis_showgrid=False,
+        yaxis_showgrid=False,
+        xaxis_tickangle=0,
+        xaxis_title=None,
+        yaxis_title="Temperature (°C)",
+        xaxis=dict(
+
+            tickangle=0,
+            showline=True,
+            linewidth=1,
+            linecolor='black',
+            ticks='outside',
+            showgrid=False
+        ),
+        yaxis=dict(
+            showline=True,
+            linewidth=1,
+            linecolor='black',
+            showgrid=False,
+            ticks='outside',
+            range=[0, None],
+        )
+    )
+
+     st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+         fig = px.line(
+             history2,
+             x="Date",
+             y="Max Temp (°C)",
+             markers=True,
+             title=f"Max Temperature For Last 30 Days – {weather2['city']}"
+         )
+
+         fig.update_layout(
+             title_x=0.3,
+             showlegend=False,
+             xaxis_showgrid=False,
+             yaxis_showgrid=False,
+             xaxis_tickangle=0,
+             xaxis_title=None,
+             yaxis_title="Max Temp (°C)",
+             xaxis=dict(
+
+                 tickangle=0,
+                 showline=True,
+                 linewidth=1,
+                 linecolor='black',
+                 ticks='outside',
+                 showgrid=False
+             ),
+             yaxis=dict(
+                 showline=True,
+                 linewidth=1,
+                 linecolor='black',
+                 showgrid=False,
+                 ticks='outside',
+                 range=[0, None],
+             )
+         )
+
+         st.plotly_chart(fig, use_container_width=True)
+
+elif isinstance(history1, pd.DataFrame) and not history1.empty:
+    fig = px.line(
+        history1,
+        x="Date",
+        y="Max Temp (°C)",
+        markers=True,
+        title=f"Max Temperature For Last 30 Days – {weather1['city']}"
+    )
+
+    fig.update_layout(
+        title_x=0.3,
+        showlegend=False,
+        xaxis_showgrid=False,
+        yaxis_showgrid=False,
+        xaxis_tickangle=0,
+        xaxis_title=None,
+        yaxis_title="Temperature (°C)",
+        xaxis=dict(
+
+            tickangle=0,
+            showline=True,
+            linewidth=1,
+            linecolor='black',
+            ticks='outside',
+            showgrid=False
+        ),
+        yaxis=dict(
+            showline=True,
+            linewidth=1,
+            linecolor='black',
+            showgrid=False,
+            ticks='outside',
+            range=[0, None],
+        )
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
+
