@@ -8,7 +8,9 @@ from streamlit_folium import st_folium
 import pytz
 import plotly.express as px
 
+
 def find_matching_cities(city: str, limit: int = 5):
+    #based on user selection, find most relevant options
     api_key = "7ca1b7fdc9a1b1da782c8929f3e2d595"
     geo_url = f"http://api.openweathermap.org/geo/1.0/direct?q={city}&limit={limit}&appid={api_key}"
 
@@ -36,13 +38,6 @@ def find_matching_cities(city: str, limit: int = 5):
         print(f"Geo API error: {error}")
         return []
 
-def is_valid_city_input(city):
-    # checks if the input is correct there are digits or special chars
-    special_char= "!@#$%^&*()_+-=[]{}/\\|;:'\",<>?`"
-    is_digit= any(char.isdigit() for char in city)
-    has_special= any(char in special_char for char in city)
-    return not is_digit and not has_special
-
 def does_city_exists(lat: float, lon: float, api_key: str):
      #Validate city name via OpenWeatherMap Geocoding API.
     geo_url = f"http://api.openweathermap.org/geo/1.0/reverse?lat={lat}&lon={lon}&limit=1&appid={api_key}"
@@ -69,12 +64,14 @@ def does_city_exists(lat: float, lon: float, api_key: str):
         return None
 
 def current_weather_data(lat: float, lon: float):
-
+    # get current weather via Current Weather Data API
     api_key = "7ca1b7fdc9a1b1da782c8929f3e2d595"
 
     weather_url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={api_key}&units=metric"
-
+    # Get city name from coords in GEO API because city name from weather is not always accurate
     location= does_city_exists(lat, lon, api_key)
+    if not location:
+        return None
     city_name = location["city_name"]
     country_name = location["country_name"]
 
@@ -86,7 +83,7 @@ def current_weather_data(lat: float, lon: float):
         if data.get('cod') != 200:
             print(f"API Error: {data.get('message')}")
             return None
-
+        #convert to city's local time
         timestamp = data.get('dt')
         timezone_offset = data.get('timezone', 0)
         target_tz = timezone(timedelta(seconds=timezone_offset))
@@ -110,21 +107,25 @@ def current_weather_data(lat: float, lon: float):
         }
 
         return weather_info
-
+    # in case of bad request
     except requests.exceptions.RequestException as error:
         print(f"Weather API request failed: {error}")
         return None
-
+    #in case of error in parsing JSON
     except (KeyError, json.JSONDecodeError) as parse_error:
         print(f"Error parsing weather data: {parse_error}")
         return None
 
 def five_day_forcast(lat: float, lon: float):
+    # Retrieving 5 days' forecast from 5 Day/ 3 Hour Forecast API
     api_key = "7ca1b7fdc9a1b1da782c8929f3e2d595"
 
     five_day_forecast_url= f"https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={api_key}&units=metric"
 
+    # Get city name from coords in GEO API
     location = does_city_exists(lat, lon, api_key)
+    if not location:
+        return None
     city_name = location["city_name"]
     country_name = location["country_name"]
 
@@ -153,7 +154,7 @@ def five_day_forcast(lat: float, lon: float):
                 entries_by_date[date_str] = []
             entries_by_date[date_str].append((local_dt, entry))
 
-        # Build one forecast per day, prefer 12:00 or 15:00
+        # Build one forecast per day, prefer hours from 11:00 - 16:00
         daily_data = []
         for date_str, entries in entries_by_date.items():
             print(f"{date_str}: {[e[0].hour for e in entries]}")
@@ -173,12 +174,12 @@ def five_day_forcast(lat: float, lon: float):
                 "wind_speed": forecast["wind"]["speed"]
             })
 
-        # Ensure you only return 5 days max
+
         return {
             "population": city_population,
             "city": city_name,
             "country": country_name,
-            "forecast": daily_data[:5]
+            "forecast": daily_data[:5] # Ensure you only return 5 days max
         }
 
     except requests.exceptions.RequestException as error:
@@ -192,6 +193,7 @@ def five_day_forcast(lat: float, lon: float):
 
 
 def get_daily_max_temps_direct(lat, lon):
+    # Getting 30 days' max temperatures from open-meteo.com
     today = datetime.now(pytz.utc).date()
     end_date = today - timedelta(days=1)
     start_date = end_date - timedelta(days=30)
@@ -224,9 +226,8 @@ def get_daily_max_temps_direct(lat, lon):
 
 #UI Functions
 def display_city_time(weather_info):
-    """
-    Accepts a weather_info dictionary and returns formatted local time string.
-    """
+    #current weather API is not accurate therefore collects current time combined with timezone offset and returns formatted local time string.
+
     timezone_offset = weather_info["local_timezone"]
 
     utc_now = datetime.now(pytz.utc)
@@ -248,7 +249,7 @@ def build_forecast_dataframe(forecast_data):
     return pd.DataFrame(rows)
 
 #Streamlit app UI
-#st.set_page_config(layout="wide")
+st.set_page_config(layout="wide")
 st.markdown("""
     <style>
         .stApp {
@@ -271,13 +272,13 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title('Streamlit Weather Checker App')
-st.markdown('Creator: Orit Padawer')
-st.markdown('Data retrieved from https://openweathermap.org/api')
+st.title('Weather Checker App')
+st.markdown('**Created by: Orit Padawer**')
+st.markdown('Data retrieved from https://openweathermap.org/api and https://archive-api.open-meteo.com')
 
 #adding user local time
 user_time = datetime.now().astimezone()
-user_time_str = user_time.strftime("%A , %B %d, %Y, %H:%M:%S")
+user_time_str = user_time.strftime("%A  %B %d, %Y %H:%M:%S")
 st.markdown(f"Current Local Time: ,{user_time_str} ")
 
 #City Selection by default 1 city, optional additional city
@@ -304,14 +305,14 @@ with col1:
         selected_city1 = matches[city_names.index(selected_city_str)]
 
         lat1, lon1 = selected_city1['lat'], selected_city1['lon']
-            #st.success(f"You selected: {selected_city_str}")
+
         weather1 = current_weather_data(lat1, lon1)
         forecast1 = five_day_forcast(lat1, lon1)
         history1 = get_daily_max_temps_direct(lat1, lon1)
 
     else:
         st.warning("No matching cities found.")
-
+# Optional second city
     compare = st.checkbox("Compare with another city?")
     selected_city2 = None
     weather2 = None
@@ -326,22 +327,23 @@ with col1:
                 matches2 = find_matching_cities(city2_input)
 
                 if matches2:
-                 city_names2 = [
-                      f"{m.get('city_name')}, {m.get('state_name', '')}, {m.get('country_name')}".strip(', ')
-                       for m in matches2
-                 ]
-                selected_city_str2 = st.selectbox("Choose a second city:", city_names2, key="city2_select")
-                selected_city2 = matches2[city_names2.index(selected_city_str2)]
+                    city_names2 = [
+                        f"{m.get('city_name')}, {m.get('state_name', '')}, {m.get('country_name')}".strip(', ')
+                        for m in matches2
+                    ]
+                    selected_city_str2 = st.selectbox("Choose a second city:", city_names2, key="city2_select")
+                    selected_city2 = matches2[city_names2.index(selected_city_str2)]
 
-                lat2, lon2 = selected_city2['lat'], selected_city2['lon']
-                #st.success(f"You selected: {selected_city_str2}")
-                weather2 = current_weather_data(lat2, lon2)
-                forecast2 = five_day_forcast(lat2, lon2)
-                history2 = get_daily_max_temps_direct(lat2, lon2)
-            else:
-                st.warning("No matching cities found.")
+                    lat2, lon2 = selected_city2['lat'], selected_city2['lon']
 
-#add map
+                    weather2 = current_weather_data(lat2, lon2)
+                    forecast2 = five_day_forcast(lat2, lon2)
+                    history2 = get_daily_max_temps_direct(lat2, lon2)
+
+                else:
+                    st.warning("No matching cities found.")
+
+#Add map
 
 if weather1:
         # Determine map center
@@ -354,6 +356,7 @@ if weather1:
 
         # Create folium map
         m = folium.Map(location=[center_lat, center_lon], zoom_start=4)
+
 
         # Add first city marker
         folium.Marker(
@@ -374,23 +377,23 @@ if weather1:
 
         # Display the map below both city inputs
         with st.container():
-            st_folium(m, width=900, height=250)
+            st_folium(m, use_container_width=True , height=600)
 
 
-# add metrics
+# Add metrics
 if weather1 and weather2:
   col1, spacer, col2 = st.columns([1, 0.2, 1])
 
   with col1:
 
       icon_col, info_col = st.columns([1, 4])
-
+        #Add Icon
       with icon_col:
           st.image(f"http://openweathermap.org/img/wn/{weather1['icon']}@2x.png", width=60)
 
       with info_col:
        st.subheader(f"{weather1['city']}, {weather1['country']}")
-      st.subheader(f"Local Time: {display_city_time(weather1)}")
+      st.subheader(f"Local Time: {display_city_time(weather1)}") #display city's local time
 
 
       metric_col1, metric_col2 = st.columns(2)
@@ -431,7 +434,7 @@ if weather1 and weather2:
 
       st.write(f"**{weather2['description'].capitalize()}**")
 
-
+# If only 1 city is selected
 elif weather1:
         icon_col, info_col = st.columns([1, 4])
 
@@ -458,7 +461,7 @@ elif weather1:
         st.write(f"**{weather1['description'].capitalize()}**")
 
 
-# add forecast table
+# Add forecast table
 if forecast1 and forecast2:
   col1, spacer, col2 = st.columns([1, 0.1, 1])
 
@@ -480,7 +483,7 @@ elif forecast1:
     st.dataframe(df1)
 
 
-# add today's history
+# Add 30 days' history
 
 if (
     isinstance(history1, pd.DataFrame) and not history1.empty and
@@ -489,13 +492,15 @@ if (
     col1, col2 = st.columns(2)
 
     with col1:
+     st.subheader(f"Max Temperatures For Last 30 Days - {weather1['city']}, {weather1['country']}")
 
      fig = px.line(
         history1,
         x="Date",
         y="Max Temp (°C)",
         markers=True,
-        title=f"Max Temperature For Last 30 Days – {weather1['city']}"
+         title=f"Max Temperature For Last 30 Days"
+
     )
 
      fig.update_layout(
@@ -521,19 +526,22 @@ if (
             linecolor='black',
             showgrid=False,
             ticks='outside',
-            range=[0, None],
+            range=[0, 55],
         )
     )
+     fig.update_traces(line_color='blue')
 
      st.plotly_chart(fig, use_container_width=True)
 
     with col2:
+         st.subheader(f"Max Temperatures For Last 30 Days - {weather2['city']}, {weather2['country']}")
          fig = px.line(
              history2,
              x="Date",
              y="Max Temp (°C)",
              markers=True,
-             title=f"Max Temperature For Last 30 Days – {weather2['city']}"
+             title=f"Max Temperature For Last 30 Days"
+
          )
 
          fig.update_layout(
@@ -559,19 +567,22 @@ if (
                  linecolor='black',
                  showgrid=False,
                  ticks='outside',
-                 range=[0, None],
+                 range=[0, 55],
              )
          )
+         fig.update_traces(line_color='green')
 
          st.plotly_chart(fig, use_container_width=True)
 
 elif isinstance(history1, pd.DataFrame) and not history1.empty:
+    st.subheader(f"Max Temperatures For Last 30 Days - {weather1['city']}, {weather1['country']}")
     fig = px.line(
         history1,
         x="Date",
         y="Max Temp (°C)",
         markers=True,
-        title=f"Max Temperature For Last 30 Days – {weather1['city']}"
+        title=f"Max Temperature For Last 30 Days"
+
     )
 
     fig.update_layout(
@@ -597,7 +608,7 @@ elif isinstance(history1, pd.DataFrame) and not history1.empty:
             linecolor='black',
             showgrid=False,
             ticks='outside',
-            range=[0, None],
+            range=[0, 55],
         )
     )
 
